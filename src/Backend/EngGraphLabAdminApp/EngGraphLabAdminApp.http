@@ -1,6 +1,21 @@
 @EngGraphLabAdminApp_HostAddress = http://localhost:5101
 
-GET {{EngGraphLabAdminApp_HostAddress}}/weatherforecast/
+GET {{EngGraphLabAdminApp_HostAddress}}/api/health
 Accept: application/json
 
 ###
+
+GET {{EngGraphLabAdminApp_HostAddress}}/api/tflex/requirements
+Accept: application/json
+
+###
+
+POST {{EngGraphLabAdminApp_HostAddress}}/api/tflex/check-connection
+Accept: application/json
+
+###
+
+# Для preview/execute используйте multipart/form-data с файлом CSV/XML:
+# file=@students.csv
+# POST /api/provisioning/preview
+# POST /api/provisioning/execute?dryRun=true

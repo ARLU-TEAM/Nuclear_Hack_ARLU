@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>T-FLEX DOCs Admin</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <p class="kicker">Nuclear IT Hack</p>
+      <h1>T-FLEX DOCs Admin Console</h1>
+      <p class="sub">Проверка подключения, разбор списка студентов и выполнение provisioning по ТЗ.</p>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Connection</h2>
+        <button id="btnCheckConfigured" class="btn btn-primary">Check configured connection</button>
+      </div>
+
+      <div id="configuredView" class="config-grid"></div>
+
+      <form id="customConnectionForm" class="grid">
+        <label>Server
+          <input name="server" placeholder="31.29.180.7:21325" required />
+        </label>
+        <label>User
+          <input name="userName" placeholder="Администратор" />
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="off" />
+        </label>
+        <label>Access token
+          <input name="accessToken" />
+        </label>
+        <label>Use access token
+          <select name="useAccessToken">
+            <option value="false" selected>false</option>
+            <option value="true">true</option>
+          </select>
+        </label>
+        <label>Configuration GUID
+          <input name="configurationGuid" placeholder="optional" />
+        </label>
+        <label>Client Program dir
+          <input name="clientProgramDirectory" placeholder="C:\Program Files (x86)\T-FLEX DOCs 17\Program" />
+        </label>
+        <label>Communication
+          <select name="communicationMode">
+            <option value="GRPC" selected>GRPC</option>
+            <option value="WCF">WCF</option>
+          </select>
+        </label>
+        <label>Serializer
+          <select name="dataSerializerAlgorithm">
+            <option value="Default" selected>Default</option>
+            <option value="Protobuf">Protobuf</option>
+            <option value="ZeroFormatter">ZeroFormatter</option>
+          </select>
+        </label>
+        <label>Compression
+          <select name="compressionAlgorithm">
+            <option value="None" selected>None</option>
+            <option value="GZip">GZip</option>
+            <option value="LZMA">LZMA</option>
+            <option value="LZ4">LZ4</option>
+            <option value="LZ4High">LZ4High</option>
+            <option value="ZSTD">ZSTD</option>
+          </select>
+        </label>
+      </form>
+
+      <div class="actions">
+        <button id="btnCheckCustom" class="btn">Check custom connection</button>
+      </div>
+      <pre id="connectionResult" class="result"></pre>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Provisioning</h2>
+      </div>
+
+      <div class="grid compact">
+        <label>Input file (CSV/XML)
+          <input id="fileInput" type="file" accept=".csv,.xml" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="btnPreview" class="btn">Preview plan</button>
+        <button id="btnDryRun" class="btn">Dry run execute</button>
+        <button id="btnExecute" class="btn btn-danger">Execute</button>
+      </div>
+
+      <div class="stats">
+        <div><span>Group:</span> <strong id="groupName">-</strong></div>
+        <div><span>Students:</span> <strong id="studentsCount">0</strong></div>
+        <div><span>Actions:</span> <strong id="actionsCount">0</strong></div>
+      </div>
+
+      <div class="tables">
+        <div>
+          <h3>Students</h3>
+          <div class="table-wrap">
+            <table id="studentsTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Login</th>
+                  <th>Full Name</th>
+                  <th>PIN</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h3>Plan Actions</h3>
+          <div class="table-wrap">
+            <table id="actionsTable">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Target</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <pre id="provisioningResult" class="result"></pre>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

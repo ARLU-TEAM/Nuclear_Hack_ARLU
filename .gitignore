@@ -83,3 +83,6 @@ nunit-*.xml
 .vscode/
 *.swp
 *.swo
+
+# local secrets
+/src/Backend/EngGraphLabAdminApp/appsettings.Local.json
