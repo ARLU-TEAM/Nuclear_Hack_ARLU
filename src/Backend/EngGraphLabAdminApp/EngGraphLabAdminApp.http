@@ -1,0 +1,6 @@
+@EngGraphLabAdminApp_HostAddress = http://localhost:5101
+
+GET {{EngGraphLabAdminApp_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

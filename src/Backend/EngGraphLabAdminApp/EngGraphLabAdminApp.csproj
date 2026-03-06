@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+    <Reference Include="TFlex.DOCs.Model">
+      <HintPath>../libs/TFlex.DOCs.Model.dll</HintPath>
+      <Private>False</Private> 
+    </Reference>
+    <Reference Include="TFlex.DOCs.Common">
+      <HintPath>../libs/TFlex.DOCs.Common.dll</HintPath>
+      <Private>False</Private> 
+    </Reference>
+  </ItemGroup>
+
+</Project>
