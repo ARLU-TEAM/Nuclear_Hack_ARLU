@@ -1,6 +1,7 @@
 using EngGraphLabAdminApp.Models;
 using EngGraphLabAdminApp.Options;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using TFlex.DOCs.Common;
 using TFlex.DOCs.Common.Encryption;
 using TFlex.DOCs.Model;
@@ -35,11 +36,34 @@ public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITF
             messages.Add(resolverMessage);
         }
 
+        var assemblySetIssue = ValidateLocalAssemblySet();
+        if (!string.IsNullOrWhiteSpace(assemblySetIssue))
+        {
+            messages.Add(assemblySetIssue);
+            return Task.FromResult(new TFlexConnectionCheckResult(
+                Success: false,
+                Message: "T-FLEX DLL set is inconsistent.",
+                ServerVersion: null,
+                IsAdministrator: null,
+                MissingDependencies: messages));
+        }
+
         try
         {
             var communication = ParseCommunication(options.CommunicationMode);
             var serializer = ParseDataSerializer(options.DataSerializerAlgorithm);
             var compression = ParseCompression(options.CompressionAlgorithm);
+
+            if (communication == CommunicationMode.WCF)
+            {
+                messages.Add("WCF mode is not supported in this backend target (net8). Use GRPC.");
+                return Task.FromResult(new TFlexConnectionCheckResult(
+                    Success: false,
+                    Message: "Unsupported communication mode.",
+                    ServerVersion: null,
+                    IsAdministrator: null,
+                    MissingDependencies: messages));
+            }
 
             var connection = options.UseAccessToken
                 ? ServerConnection.OpenWithToken(
@@ -77,6 +101,7 @@ public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITF
         catch (FileNotFoundException ex)
         {
             messages.Add(ex.Message);
+            AppendExceptionChain(messages, ex);
             return Task.FromResult(new TFlexConnectionCheckResult(
                 Success: false,
                 Message: "Required T-FLEX dependent DLLs are missing.",
@@ -87,6 +112,25 @@ public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITF
         catch (TypeInitializationException ex)
         {
             messages.Add(ex.InnerException?.Message ?? ex.Message);
+            AppendExceptionChain(messages, ex);
+
+            var isGrpcRuntimeIncompatible =
+                ExceptionChainContains(ex, "TFlex.DOCs.GRPC.Formatters.DynamicAssemblyHolder") &&
+                ExceptionChainContains(ex, "Illegal enum value: 3");
+
+            if (isGrpcRuntimeIncompatible)
+            {
+                messages.Add("Current runtime is net8. T-FLEX GRPC formatter in this DLL set expects .NET Framework behavior.");
+                messages.Add("Recommended: run T-FLEX integration adapter on .NET Framework 4.7.2/4.8 and call it from this web app.");
+
+                return Task.FromResult(new TFlexConnectionCheckResult(
+                    Success: false,
+                    Message: "T-FLEX GRPC runtime incompatibility with net8.",
+                    ServerVersion: null,
+                    IsAdministrator: null,
+                    MissingDependencies: messages));
+            }
+
             return Task.FromResult(new TFlexConnectionCheckResult(
                 Success: false,
                 Message: "T-FLEX API initialization failed. Most likely missing dependent DLLs.",
@@ -96,9 +140,10 @@ public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITF
         }
         catch (Exception ex)
         {
+            AppendExceptionChain(messages, ex);
             return Task.FromResult(new TFlexConnectionCheckResult(
                 Success: false,
-                Message: $"Connection error: {ex.Message}",
+                Message: $"Connection error: {ex.GetType().Name}: {ex.Message}",
                 ServerVersion: null,
                 IsAdministrator: null,
                 MissingDependencies: messages));
@@ -166,4 +211,81 @@ public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITF
 
         return errors;
     }
+
+    private static string? ValidateLocalAssemblySet()
+    {
+        var baseDir = AppContext.BaseDirectory;
+
+        var modelPath = Path.Combine(baseDir, "TFlex.DOCs.Model.dll");
+        var commonPath = Path.Combine(baseDir, "TFlex.DOCs.Common.dll");
+        var dataPath = Path.Combine(baseDir, "TFlex.DOCs.Data.dll");
+        var dataMailPath = Path.Combine(baseDir, "TFlex.DOCs.Data.Mail.dll");
+        var tasksExtPath = Path.Combine(baseDir, "System.Threading.Tasks.Extensions.dll");
+        var chilkatPath = Path.Combine(baseDir, "ChilkatDotNet47.dll");
+
+        if (!File.Exists(modelPath) || !File.Exists(commonPath) || !File.Exists(dataPath))
+        {
+            return "One or more core DLLs are missing in output folder: TFlex.DOCs.Model/Common/Data.";
+        }
+
+        if (!File.Exists(dataMailPath))
+        {
+            return "Missing dependency: TFlex.DOCs.Data.Mail.dll";
+        }
+
+        if (!File.Exists(tasksExtPath))
+        {
+            return "Missing dependency: System.Threading.Tasks.Extensions.dll (required version 4.2.0.1).";
+        }
+
+        if (!File.Exists(chilkatPath))
+        {
+            return "Missing dependency: ChilkatDotNet47.dll (required by TFlex.DOCs.Data.Mail).";
+        }
+
+        var modelVersion = AssemblyName.GetAssemblyName(modelPath).Version;
+        var commonVersion = AssemblyName.GetAssemblyName(commonPath).Version;
+        var dataVersion = AssemblyName.GetAssemblyName(dataPath).Version;
+
+        if (modelVersion != commonVersion || modelVersion != dataVersion)
+        {
+            return $"DLL versions mismatch. Model={modelVersion}; Common={commonVersion}; Data={dataVersion}. Use one consistent set.";
+        }
+
+        return null;
+    }
+
+    private static void AppendExceptionChain(List<string> messages, Exception ex)
+    {
+        var current = ex.InnerException;
+        while (current is not null)
+        {
+            messages.Add($"{current.GetType().Name}: {current.Message}");
+            current = current.InnerException;
+        }
+    }
+
+    private static bool ExceptionChainContains(Exception ex, string text)
+    {
+        if (Contains(ex.Message, text))
+        {
+            return true;
+        }
+
+        var current = ex.InnerException;
+        while (current is not null)
+        {
+            if (Contains(current.Message, text))
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
+    }
+
+    private static bool Contains(string source, string value) =>
+        source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
 }

@@ -16,18 +16,18 @@ internal static class TFlexAssemblyResolverBootstrap
 
         if (string.IsNullOrWhiteSpace(clientProgramDirectory))
         {
-            return "ClientProgramDirectory не задан. Встроенный AssemblyResolver не активирован.";
+            return null;
         }
 
         if (!Directory.Exists(clientProgramDirectory))
         {
-            return $"Папка клиента T-FLEX DOCs не найдена: {clientProgramDirectory}";
+            return $"T-FLEX client directory was not found: {clientProgramDirectory}";
         }
 
         var resolverAssemblyPath = Path.Combine(clientProgramDirectory, "TFlex.PdmFramework.Resolve.dll");
         if (!File.Exists(resolverAssemblyPath))
         {
-            return $"Не найден файл {resolverAssemblyPath}. Установите T-FLEX DOCs клиент или поправьте путь.";
+            return $"Resolver DLL is missing: {resolverAssemblyPath}";
         }
 
         try
@@ -36,7 +36,7 @@ internal static class TFlexAssemblyResolverBootstrap
             var resolverType = assembly.GetType("TFlex.PdmFramework.Resolve.AssemblyResolver", throwOnError: false);
             if (resolverType is null)
             {
-                return "Тип TFlex.PdmFramework.Resolve.AssemblyResolver не найден.";
+                return "Type TFlex.PdmFramework.Resolve.AssemblyResolver was not found.";
             }
 
             var instanceProperty = resolverType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
@@ -45,7 +45,7 @@ internal static class TFlexAssemblyResolverBootstrap
 
             if (instance is null || addDirectoryMethod is null)
             {
-                return "AssemblyResolver найден, но не удалось получить Instance/AddDirectory.";
+                return "AssemblyResolver instance or AddDirectory method was not found.";
             }
 
             addDirectoryMethod.Invoke(instance, [clientProgramDirectory]);
@@ -53,7 +53,7 @@ internal static class TFlexAssemblyResolverBootstrap
         }
         catch (Exception ex)
         {
-            return $"Ошибка инициализации AssemblyResolver: {ex.Message}";
+            return $"AssemblyResolver initialization error: {ex.Message}";
         }
     }
 }

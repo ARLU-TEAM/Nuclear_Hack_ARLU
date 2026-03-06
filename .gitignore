@@ -70,6 +70,7 @@ nunit-*.xml
 # Библиотеки T-FLEX
 !/src/Backend/libs/TFlex.DOCs.Common.dll
 !/src/Backend/libs/TFlex.DOCs.Model.dll
+!/src/Backend/libs/TFlex.DOCs.Data.dll
 
 # Логи и временные файлы
 *.log
