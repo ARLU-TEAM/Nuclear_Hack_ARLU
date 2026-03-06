@@ -67,6 +67,10 @@ nunit-*.xml
 *.VC.db
 *.VC.VC.opendb
 
+# Библиотеки T-FLEX
+!/src/Backend/libs/TFlex.DOCs.Common.dll
+!/src/Backend/libs/TFlex.DOCs.Model.dll
+
 # Логи и временные файлы
 *.log
 *.tlog
