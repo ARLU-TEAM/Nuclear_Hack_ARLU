@@ -10,18 +10,11 @@ export const metadata: Metadata = {
   description: 'Система автоматизации рабочих процессов кафедры инженерной графики НИЯУ МИФИ',
   icons: {
     icon: [
+
       {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
+        url: '/favicon.png',
         media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
+      }
     ],
   },
 }

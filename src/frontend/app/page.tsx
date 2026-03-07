@@ -347,8 +347,8 @@ export default function TFlexDocsPanel() {
 
       <div className="w-full max-w-lg space-y-6">
         <header className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight select-none" style={{ color: '#000' }}>T-FLEX DOCs</h1>
-          <p className="text-sm font-medium mt-1 select-none" style={{ color: '#4a5568' }}>Панель управления кафедры</p>
+          <h1 className="text-2xl font-bold tracking-tight select-none" style={{ color: '#000' }}>EngGraphLabAdminApp</h1>
+          <p className="text-sm font-medium mt-1 select-none" style={{ color: '#4a5568' }}>Панель управления T-Flex</p>
         </header>
 
         {/* Создание пользователей */}
