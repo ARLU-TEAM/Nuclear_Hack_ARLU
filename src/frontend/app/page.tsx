@@ -18,7 +18,7 @@ interface OperationState {
 // API
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-// 1) Создание пользователей
+//  Создание пользователей
 async function createUsersAPI(payload: { 
   useServiceFolder: boolean
   serviceFiles?: string[]
@@ -63,7 +63,7 @@ async function getGroupsAPI(): Promise<{ groups: string[] }> {
   return response.json()
 }
 
-// 2) Распределение заданий
+// Распределение заданий
 async function distributeTasksAPI(groupNames: string[]): Promise<{ success: boolean; message: string }> {
   const response = await fetch(`${API_BASE}/api/tasks/distribute`, {
     method: "POST",
@@ -99,7 +99,7 @@ const StatusIndicator = ({ state }: { state: OperationState }) => {
 }
 
 export default function TFlexDocsPanel() {
-  // --- Пользователи ---
+  // Пользователи 
   const [files, setFiles] = useState<File[]>([])
   const [useServiceFolder, setUseServiceFolder] = useState(false)
   const [serviceFiles, setServiceFiles] = useState<string[]>([])
@@ -108,7 +108,7 @@ export default function TFlexDocsPanel() {
   const [isDragging, setIsDragging] = useState(false)
   const [usersState, setUsersState] = useState<OperationState>({ status: "idle", message: "" })
 
-  // --- Распределение заданий ---
+  // Распределение заданий 
   const [groups, setGroups] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<string[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
@@ -129,13 +129,8 @@ export default function TFlexDocsPanel() {
         const data = await getGroupsAPI()
         setGroups(data.groups || [])
       } catch {
-        // Демо-данные (много групп для теста скролла)
-        setGroups([
-          "Б22-101", "Б22-102", "Б22-103", "Б22-104", "Б22-105",
-          "Б23-101", "Б23-102", "Б23-103", "Б23-104", "Б23-105",
-          "М22-201", "М22-202", "М23-201", "М23-202", "М23-203",
-          "Б21-101", "Б21-102", "Б21-103", "Б24-101", "Б24-102"
-        ])
+        // Демо-данные
+        setGroups(["М22-501", "М22-502", "М23-501", "М23-502"])
       } finally {
         setLoadingGroups(false)
       }
@@ -153,7 +148,7 @@ export default function TFlexDocsPanel() {
           setServiceFiles(data.files || [])
         } catch {
           // Демо-данные
-          setServiceFiles(["students_b22_101.xlsx", "students_b22_102.csv", "new_users.xml"])
+          setServiceFiles(["М22-501.xlsx", "М23-501.csv"])
         } finally {
           setLoadingServiceFiles(false)
         }
@@ -504,7 +499,7 @@ export default function TFlexDocsPanel() {
           </CardContent>
         </Card>
 
-        {/* Распределение заданий */}
+        {/*  Распределение заданий  */}
         <Card className="panel-card">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg font-bold flex items-center gap-2 select-none" style={{ color: '#000' }}>
@@ -584,7 +579,7 @@ export default function TFlexDocsPanel() {
         </Card>
 
         <footer className="text-center text-xs font-medium select-none" style={{ color: '#64748b' }}>
-          Результат отобразится в T-FLEX DOCs
+          Результат отообразится в T-FLEX
         </footer>
       </div>
     </div>
