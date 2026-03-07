@@ -1,6 +1,6 @@
 ﻿# Nuclear_Hack_ARLU
 
-Тестовый стенд: 31.29.180.7:789453.
+Тестовый стенд: 31.29.180.7:45632.
 
 Вход в T-FLEX:
 - Адрес: 31.29.180.7:21325
@@ -41,7 +41,7 @@ dotnet build src/Backend/TFlexDocsAdapter/TFlexDocsAdapter.csproj -c Release
 ```powershell
 dotnet run --project src/Backend/EngGraphLabAdminApp/EngGraphLabAdminApp.csproj -c Release
 ```
-5. Откройте UI: `http://localhost:5101/`.
+5. Откройте UI: `http://localhost:45632/`.
 
 ## 2. Как поменять адреса и установить версию DLL
 1. Адреса и доступы меняются в `src/Backend/EngGraphLabAdminApp/appsettings.Local.json`:
