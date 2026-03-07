@@ -1,183 +1,390 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
 using EngGraphLabAdminApp.Models;
 using EngGraphLabAdminApp.Options;
 using Microsoft.Extensions.Options;
-using System.Reflection;
-using TFlex.DOCs.Common;
-using TFlex.DOCs.Common.Encryption;
-using TFlex.DOCs.Model;
 
 namespace EngGraphLabAdminApp.Services;
 
-public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITFlexConnectionService
+public sealed class TFlexConnectionService(
+    IOptions<TFlexOptions> options,
+    IOptions<TFlexAdapterOptions> adapterOptions,
+    ILogger<TFlexConnectionService> logger) : ITFlexConnectionService
 {
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     private readonly TFlexOptions _options = options.Value;
+    private readonly TFlexAdapterOptions _adapterOptions = adapterOptions.Value;
+    private readonly ILogger<TFlexConnectionService> _logger = logger;
+
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static readonly JsonSerializerOptions RequestSerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public Task<TFlexConnectionCheckResult> CheckConnectionAsync(CancellationToken cancellationToken)
         => CheckConnectionAsync(_options, cancellationToken);
 
-    public Task<TFlexConnectionCheckResult> CheckConnectionAsync(TFlexOptions options, CancellationToken cancellationToken)
+    public async Task<TFlexConnectionCheckResult> CheckConnectionAsync(TFlexOptions options, CancellationToken cancellationToken)
     {
-        _ = cancellationToken;
-
-        var messages = ValidateOptions(options);
-        if (messages.Count > 0)
+        var diagnostics = ValidateOptions(options);
+        if (diagnostics.Count > 0)
         {
-            return Task.FromResult(new TFlexConnectionCheckResult(
+            return new TFlexConnectionCheckResult(
                 Success: false,
                 Message: "TFlex configuration is incomplete.",
                 ServerVersion: null,
                 IsAdministrator: null,
-                MissingDependencies: messages));
+                MissingDependencies: diagnostics);
         }
 
-        var resolverMessage = TFlexAssemblyResolverBootstrap.TryInitialize(options.ClientProgramDirectory);
-        if (!string.IsNullOrWhiteSpace(resolverMessage))
-        {
-            messages.Add(resolverMessage);
-        }
+        var request = BuildConnectionRequest(options);
+        var invocation = await InvokeAdapterAsync<TFlexConnectionRequest, TFlexConnectionCheckResult>(
+            command: "check-connection",
+            payload: request,
+            cancellationToken: cancellationToken);
 
-        var assemblySetIssue = ValidateLocalAssemblySet();
-        if (!string.IsNullOrWhiteSpace(assemblySetIssue))
+        var mergedDiagnostics = MergeDiagnostics(diagnostics, invocation.Diagnostics);
+        if (invocation.Payload is null)
         {
-            messages.Add(assemblySetIssue);
-            return Task.FromResult(new TFlexConnectionCheckResult(
+            return new TFlexConnectionCheckResult(
                 Success: false,
-                Message: "T-FLEX DLL set is inconsistent.",
+                Message: "TFlex adapter returned invalid payload.",
                 ServerVersion: null,
                 IsAdministrator: null,
-                MissingDependencies: messages));
+                MissingDependencies: mergedDiagnostics);
+        }
+
+        var payload = invocation.Payload;
+        mergedDiagnostics = MergeDiagnostics(mergedDiagnostics, payload.MissingDependencies);
+
+        if (invocation.ExitCode is not 0)
+        {
+            return payload with
+            {
+                Success = false,
+                Message = string.IsNullOrWhiteSpace(payload.Message)
+                    ? "TFlex adapter process failed."
+                    : payload.Message,
+                MissingDependencies = mergedDiagnostics
+            };
+        }
+
+        return payload with { MissingDependencies = mergedDiagnostics };
+    }
+
+    public async Task<ProvisioningExecutionResult> ExecuteFoundationAsync(ProvisioningPlan plan, bool includeTaskDistribution, CancellationToken cancellationToken)
+    {
+        var diagnostics = ValidateOptions(_options);
+        if (diagnostics.Count > 0)
+        {
+            return new ProvisioningExecutionResult(
+                Success: false,
+                Message: "TFlex configuration is incomplete.",
+                PlannedActions: plan.Actions.Count,
+                ExecutedActions: 0,
+                Logs: [],
+                Warnings: [],
+                Diagnostics: diagnostics);
+        }
+
+        if (string.IsNullOrWhiteSpace(plan.GroupName))
+        {
+            return new ProvisioningExecutionResult(
+                Success: false,
+                Message: "Group name is empty.",
+                PlannedActions: plan.Actions.Count,
+                ExecutedActions: 0,
+                Logs: [],
+                Warnings: [],
+                Diagnostics: []);
+        }
+
+        if (plan.Students.Count == 0)
+        {
+            return new ProvisioningExecutionResult(
+                Success: false,
+                Message: "Students list is empty.",
+                PlannedActions: plan.Actions.Count,
+                ExecutedActions: 0,
+                Logs: [],
+                Warnings: [],
+                Diagnostics: []);
+        }
+
+        var request = new TFlexProvisioningExecuteRequest
+        {
+            Connection = BuildConnectionRequest(_options),
+            GroupName = plan.GroupName,
+            PlannedActions = plan.Actions.Count,
+            AssignTasks = includeTaskDistribution,
+            Students = plan.Students
+                .Select(student => new TFlexProvisioningStudent
+                {
+                    LastName = student.LastName,
+                    FirstName = student.FirstName,
+                    MiddleName = student.MiddleName,
+                    Login = student.Login,
+                    PinCode = student.PinCode,
+                    FolderName = student.FolderName
+                })
+                .ToArray()
+        };
+
+        var invocation = await InvokeAdapterAsync<TFlexProvisioningExecuteRequest, TFlexProvisioningExecuteResult>(
+            command: "execute-foundation",
+            payload: request,
+            cancellationToken: cancellationToken);
+
+        var mergedDiagnostics = MergeDiagnostics(diagnostics, invocation.Diagnostics);
+        if (invocation.Payload is null)
+        {
+            return new ProvisioningExecutionResult(
+                Success: false,
+                Message: "TFlex adapter returned invalid payload.",
+                PlannedActions: plan.Actions.Count,
+                ExecutedActions: 0,
+                Logs: [],
+                Warnings: [],
+                Diagnostics: mergedDiagnostics);
+        }
+
+        var payload = invocation.Payload;
+        mergedDiagnostics = MergeDiagnostics(mergedDiagnostics, payload.MissingDependencies);
+
+        if (invocation.ExitCode is not 0)
+        {
+            return new ProvisioningExecutionResult(
+                Success: false,
+                Message: string.IsNullOrWhiteSpace(payload.Message)
+                    ? "TFlex provisioning adapter failed."
+                    : payload.Message,
+                PlannedActions: payload.PlannedActions,
+                ExecutedActions: payload.ExecutedActions,
+                Logs: payload.Logs,
+                Warnings: payload.Warnings,
+                Diagnostics: mergedDiagnostics);
+        }
+
+        return new ProvisioningExecutionResult(
+            Success: payload.Success,
+            Message: payload.Message,
+            PlannedActions: payload.PlannedActions,
+            ExecutedActions: payload.ExecutedActions,
+            Logs: payload.Logs,
+            Warnings: payload.Warnings,
+            Diagnostics: mergedDiagnostics);
+    }
+
+    private async Task<AdapterInvocation<TResponse>> InvokeAdapterAsync<TRequest, TResponse>(
+        string command,
+        TRequest payload,
+        CancellationToken cancellationToken)
+        where TResponse : class
+    {
+        var diagnostics = new List<string>();
+
+        var candidatePaths = BuildAdapterCandidates();
+        var adapterPath = ResolveAdapterPath(candidatePaths);
+        if (adapterPath is null)
+        {
+            diagnostics.Add("TFlex adapter executable was not found.");
+            diagnostics.AddRange(candidatePaths.Select(path => $"Checked: {path}"));
+            diagnostics.Add("Build adapter project: dotnet build src/Backend/TFlexDocsAdapter/TFlexDocsAdapter.csproj");
+            return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), -1);
         }
 
         try
         {
-            var communication = ParseCommunication(options.CommunicationMode);
-            var serializer = ParseDataSerializer(options.DataSerializerAlgorithm);
-            var compression = ParseCompression(options.CompressionAlgorithm);
-
-            if (communication == CommunicationMode.WCF)
+            _logger.LogInformation("Starting TFlex adapter command {Command}.", command);
+            using var process = StartAdapterProcess(adapterPath, command);
+            if (process is null)
             {
-                messages.Add("WCF mode is not supported in this backend target (net8). Use GRPC.");
-                return Task.FromResult(new TFlexConnectionCheckResult(
-                    Success: false,
-                    Message: "Unsupported communication mode.",
-                    ServerVersion: null,
-                    IsAdministrator: null,
-                    MissingDependencies: messages));
+                diagnostics.Add($"Unable to start adapter process from '{adapterPath}'.");
+                return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), -1);
             }
 
-            var connection = options.UseAccessToken
-                ? ServerConnection.OpenWithToken(
-                    options.Server,
-                    options.AccessToken,
-                    options.ConfigurationGuid,
-                    communication,
-                    serializer,
-                    compression,
-                    proxy: null)
-                : ServerConnection.Open(
-                    options.UserName,
-                    new MD5HashString(options.Password, encrypt: true),
-                    options.Server,
-                    options.ConfigurationGuid,
-                    communication,
-                    serializer,
-                    compression,
-                    proxy: null);
+            var requestJson = JsonSerializer.Serialize(payload, RequestSerializerOptions);
+            await process.StandardInput.WriteAsync(requestJson);
+            await process.StandardInput.FlushAsync();
+            process.StandardInput.Close();
 
-            using (connection)
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            var timeout = TimeSpan.FromSeconds(NormalizeTimeoutSeconds(_adapterOptions.RequestTimeoutSeconds));
+            var waitTask = process.WaitForExitAsync(cancellationToken);
+            var completedTask = await Task.WhenAny(waitTask, Task.Delay(timeout, cancellationToken));
+            if (completedTask != waitTask)
             {
-                var version = connection.Version?.ToString();
-                var isAdmin = connection.IsAdministrator;
-                connection.Close();
-
-                return Task.FromResult(new TFlexConnectionCheckResult(
-                    Success: true,
-                    Message: "Connected to T-FLEX DOCs.",
-                    ServerVersion: version,
-                    IsAdministrator: isAdmin,
-                    MissingDependencies: messages));
+                TryTerminate(process);
+                diagnostics.Add($"Adapter timeout after {timeout.TotalSeconds:F0}s.");
+                diagnostics.Add($"Adapter path: {adapterPath}");
+                diagnostics.Add(await SafeRead(stderrTask));
+                return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), -1);
             }
+
+            await waitTask;
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+
+            _logger.LogInformation(
+                "TFlex adapter command {Command} finished. ExitCode={ExitCode}, AdapterPath={AdapterPath}",
+                command,
+                process.ExitCode,
+                adapterPath);
+
+            if (string.IsNullOrWhiteSpace(stdout))
+            {
+                diagnostics.Add("Adapter returned empty response.");
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    diagnostics.Add($"Adapter stderr: {stderr.Trim()}");
+                }
+
+                return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), process.ExitCode);
+            }
+
+            TResponse? response;
+            try
+            {
+                response = JsonSerializer.Deserialize<TResponse>(stdout, SerializerOptions);
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Add($"Cannot parse adapter JSON: {ex.GetType().Name}: {ex.Message}");
+                diagnostics.Add($"Adapter stdout: {TrimForDiagnostics(stdout)}");
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    diagnostics.Add($"Adapter stderr: {stderr.Trim()}");
+                }
+
+                return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), process.ExitCode);
+            }
+
+            if (response is null)
+            {
+                diagnostics.Add("Adapter JSON was parsed as null.");
+                return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), process.ExitCode);
+            }
+
+            if (process.ExitCode != 0)
+            {
+                AddUnique(diagnostics, $"Adapter exit code: {process.ExitCode}");
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    AddUnique(diagnostics, $"Adapter stderr: {stderr.Trim()}");
+                }
+
+                _logger.LogWarning(
+                    "TFlex adapter command {Command} failed. ExitCode={ExitCode}. Stderr={Stderr}",
+                    command,
+                    process.ExitCode,
+                    string.IsNullOrWhiteSpace(stderr) ? "<empty>" : stderr.Trim());
+            }
+            else if (!string.IsNullOrWhiteSpace(stderr))
+            {
+                AddUnique(diagnostics, $"Adapter stderr: {stderr.Trim()}");
+                _logger.LogInformation("TFlex adapter command {Command} stderr: {Stderr}", command, stderr.Trim());
+            }
+
+            return new AdapterInvocation<TResponse>(response, CleanupDiagnostics(diagnostics), process.ExitCode);
         }
-        catch (FileNotFoundException ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            messages.Add(ex.Message);
-            AppendExceptionChain(messages, ex);
-            return Task.FromResult(new TFlexConnectionCheckResult(
-                Success: false,
-                Message: "Required T-FLEX dependent DLLs are missing.",
-                ServerVersion: null,
-                IsAdministrator: null,
-                MissingDependencies: messages));
-        }
-        catch (TypeInitializationException ex)
-        {
-            messages.Add(ex.InnerException?.Message ?? ex.Message);
-            AppendExceptionChain(messages, ex);
-
-            var isGrpcRuntimeIncompatible =
-                ExceptionChainContains(ex, "TFlex.DOCs.GRPC.Formatters.DynamicAssemblyHolder") &&
-                ExceptionChainContains(ex, "Illegal enum value: 3");
-
-            if (isGrpcRuntimeIncompatible)
-            {
-                messages.Add("Current runtime is net8. T-FLEX GRPC formatter in this DLL set expects .NET Framework behavior.");
-                messages.Add("Recommended: run T-FLEX integration adapter on .NET Framework 4.7.2/4.8 and call it from this web app.");
-
-                return Task.FromResult(new TFlexConnectionCheckResult(
-                    Success: false,
-                    Message: "T-FLEX GRPC runtime incompatibility with net8.",
-                    ServerVersion: null,
-                    IsAdministrator: null,
-                    MissingDependencies: messages));
-            }
-
-            return Task.FromResult(new TFlexConnectionCheckResult(
-                Success: false,
-                Message: "T-FLEX API initialization failed. Most likely missing dependent DLLs.",
-                ServerVersion: null,
-                IsAdministrator: null,
-                MissingDependencies: messages));
+            diagnostics.Add("Adapter call was canceled.");
+            return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), -1);
         }
         catch (Exception ex)
         {
-            AppendExceptionChain(messages, ex);
-            return Task.FromResult(new TFlexConnectionCheckResult(
-                Success: false,
-                Message: $"Connection error: {ex.GetType().Name}: {ex.Message}",
-                ServerVersion: null,
-                IsAdministrator: null,
-                MissingDependencies: messages));
+            _logger.LogError(ex, "TFlex adapter process call failed. Command: {Command}", command);
+            diagnostics.Add($"Adapter command: {command}");
+            AppendExceptionChain(diagnostics, ex);
+            return new AdapterInvocation<TResponse>(null, CleanupDiagnostics(diagnostics), -1);
         }
     }
 
-    private static CommunicationMode ParseCommunication(string value)
+    private static TFlexConnectionRequest BuildConnectionRequest(TFlexOptions options)
     {
-        if (Enum.TryParse<CommunicationMode>(value, true, out var mode))
+        return new TFlexConnectionRequest
         {
-            return mode;
-        }
-
-        return DataFormatterSettings.DefaultCommunicationMode;
+            Server = options.Server,
+            UserName = options.UserName,
+            Password = options.Password,
+            UseAccessToken = options.UseAccessToken,
+            AccessToken = options.AccessToken,
+            ConfigurationGuid = options.ConfigurationGuid,
+            CommunicationMode = options.CommunicationMode,
+            DataSerializerAlgorithm = options.DataSerializerAlgorithm,
+            CompressionAlgorithm = options.CompressionAlgorithm,
+            FolderCreationMacroName = options.FolderCreationMacroName
+        };
     }
 
-    private static DataSerializerAlgorithm ParseDataSerializer(string value)
+    private Process? StartAdapterProcess(string adapterPath, string command)
     {
-        if (Enum.TryParse<DataSerializerAlgorithm>(value, true, out var algorithm))
+        var processInfo = new ProcessStartInfo
         {
-            return algorithm;
-        }
+            FileName = adapterPath,
+            Arguments = command,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = Utf8NoBom,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
 
-        return DataFormatterSettings.DefaultDataSerializerAlgorithm;
+        return Process.Start(processInfo);
     }
 
-    private static CompressionAlgorithm ParseCompression(string value)
+    private IReadOnlyList<string> BuildAdapterCandidates()
     {
-        if (Enum.TryParse<CompressionAlgorithm>(value, true, out var algorithm))
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(_adapterOptions.ExecutablePath))
         {
-            return algorithm;
+            candidates.Add(Path.GetFullPath(_adapterOptions.ExecutablePath));
         }
 
-        return DataFormatterSettings.DefaultCompressionAlgorithm;
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "TFlexDocsAdapter.exe"));
+        candidates.Add(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "TFlexDocsAdapter", "bin", "Release", "net48", "TFlexDocsAdapter.exe")));
+        candidates.Add(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "TFlexDocsAdapter", "bin", "Debug", "net48", "TFlexDocsAdapter.exe")));
+
+        return candidates
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string? ResolveAdapterPath(IEnumerable<string> candidates)
+    {
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static int NormalizeTimeoutSeconds(int value)
+    {
+        if (value < 1)
+        {
+            return 30;
+        }
+
+        return Math.Min(value, 300);
     }
 
     private static List<string> ValidateOptions(TFlexOptions options)
@@ -212,80 +419,98 @@ public sealed class TFlexConnectionService(IOptions<TFlexOptions> options) : ITF
         return errors;
     }
 
-    private static string? ValidateLocalAssemblySet()
+    private static List<string> MergeDiagnostics(IReadOnlyList<string> left, IReadOnlyList<string> right)
     {
-        var baseDir = AppContext.BaseDirectory;
-
-        var modelPath = Path.Combine(baseDir, "TFlex.DOCs.Model.dll");
-        var commonPath = Path.Combine(baseDir, "TFlex.DOCs.Common.dll");
-        var dataPath = Path.Combine(baseDir, "TFlex.DOCs.Data.dll");
-        var dataMailPath = Path.Combine(baseDir, "TFlex.DOCs.Data.Mail.dll");
-        var tasksExtPath = Path.Combine(baseDir, "System.Threading.Tasks.Extensions.dll");
-        var chilkatPath = Path.Combine(baseDir, "ChilkatDotNet47.dll");
-
-        if (!File.Exists(modelPath) || !File.Exists(commonPath) || !File.Exists(dataPath))
+        var merged = new List<string>(left.Count + right.Count);
+        foreach (var item in left)
         {
-            return "One or more core DLLs are missing in output folder: TFlex.DOCs.Model/Common/Data.";
+            AddUnique(merged, item);
         }
 
-        if (!File.Exists(dataMailPath))
+        foreach (var item in right)
         {
-            return "Missing dependency: TFlex.DOCs.Data.Mail.dll";
+            AddUnique(merged, item);
         }
 
-        if (!File.Exists(tasksExtPath))
-        {
-            return "Missing dependency: System.Threading.Tasks.Extensions.dll (required version 4.2.0.1).";
-        }
-
-        if (!File.Exists(chilkatPath))
-        {
-            return "Missing dependency: ChilkatDotNet47.dll (required by TFlex.DOCs.Data.Mail).";
-        }
-
-        var modelVersion = AssemblyName.GetAssemblyName(modelPath).Version;
-        var commonVersion = AssemblyName.GetAssemblyName(commonPath).Version;
-        var dataVersion = AssemblyName.GetAssemblyName(dataPath).Version;
-
-        if (modelVersion != commonVersion || modelVersion != dataVersion)
-        {
-            return $"DLL versions mismatch. Model={modelVersion}; Common={commonVersion}; Data={dataVersion}. Use one consistent set.";
-        }
-
-        return null;
+        return merged;
     }
 
-    private static void AppendExceptionChain(List<string> messages, Exception ex)
+    private static List<string> CleanupDiagnostics(IReadOnlyList<string> diagnostics)
     {
-        var current = ex.InnerException;
-        while (current is not null)
+        var cleaned = new List<string>();
+        foreach (var item in diagnostics)
         {
-            messages.Add($"{current.GetType().Name}: {current.Message}");
-            current = current.InnerException;
+            AddUnique(cleaned, item);
+        }
+
+        return cleaned;
+    }
+
+    private static void AddUnique(List<string> target, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (!target.Contains(value, StringComparer.Ordinal))
+        {
+            target.Add(value);
         }
     }
 
-    private static bool ExceptionChainContains(Exception ex, string text)
+    private static string TrimForDiagnostics(string text)
     {
-        if (Contains(ex.Message, text))
+        const int max = 800;
+        var value = text.Trim();
+        if (value.Length <= max)
         {
-            return true;
+            return value;
         }
 
-        var current = ex.InnerException;
-        while (current is not null)
+        return value[..max] + "...";
+    }
+
+    private static async Task<string> SafeRead(Task<string> readTask)
+    {
+        try
         {
-            if (Contains(current.Message, text))
+            return await readTask;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void TryTerminate(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
             {
-                return true;
+                process.Kill(entireProcessTree: true);
             }
-
-            current = current.InnerException;
         }
-
-        return false;
+        catch
+        {
+            // Ignore cleanup failures.
+        }
     }
 
-    private static bool Contains(string source, string value) =>
-        source?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
+    private static void AppendExceptionChain(List<string> diagnostics, Exception ex)
+    {
+        var current = ex;
+        while (current is not null)
+        {
+            diagnostics.Add($"{current.GetType().Name}: {current.Message}");
+            current = current.InnerException;
+        }
+    }
+
+    private sealed record AdapterInvocation<TPayload>(
+        TPayload? Payload,
+        IReadOnlyList<string> Diagnostics,
+        int ExitCode)
+        where TPayload : class;
 }

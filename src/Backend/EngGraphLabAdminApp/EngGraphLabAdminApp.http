@@ -10,12 +10,21 @@ Accept: application/json
 
 ###
 
+GET {{EngGraphLabAdminApp_HostAddress}}/api/frontend/endpoints
+Accept: application/json
+
+###
+
 POST {{EngGraphLabAdminApp_HostAddress}}/api/tflex/check-connection
 Accept: application/json
 
 ###
 
-# Для preview/execute используйте multipart/form-data с файлом CSV/XML:
-# file=@students.csv
+# Для preview/execute используйте multipart/form-data:
+# file=@students.csv (один файл) или files=@group1.csv + files=@group2.csv (несколько групп)
 # POST /api/provisioning/preview
 # POST /api/provisioning/execute?dryRun=true
+
+###
+
+GET {{EngGraphLabAdminApp_HostAddress}}/api/provisioning/sample-csv

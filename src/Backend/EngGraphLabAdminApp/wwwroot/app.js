@@ -9,6 +9,10 @@ const els = {
   actionsCount: document.getElementById("actionsCount"),
   studentsTableBody: document.querySelector("#studentsTable tbody"),
   actionsTableBody: document.querySelector("#actionsTable tbody"),
+  passwordDownloads: document.getElementById("passwordDownloads"),
+  passwordDownloadsList: document.getElementById("passwordDownloadsList"),
+  executionLogs: document.getElementById("executionLogs"),
+  executionWarnings: document.getElementById("executionWarnings"),
   btnCheckConfigured: document.getElementById("btnCheckConfigured"),
   btnCheckCustom: document.getElementById("btnCheckCustom"),
   btnPreview: document.getElementById("btnPreview"),
@@ -37,33 +41,33 @@ function bindEvents() {
     renderJson(els.connectionResult, result);
   }, els.connectionResult));
 
-  els.btnPreview.addEventListener("click", () => runAction(async () => {
-    const file = requireFile();
-    if (!file) return;
+  els.btnPreview.addEventListener("click", () => runProvisioningAction(async () => {
+    const files = requireFiles();
+    if (!files) return;
     const body = new FormData();
-    body.append("file", file);
+    appendFiles(body, files);
     const result = await request("POST", "/api/provisioning/preview", body, true);
     renderProvisioning(result);
-  }, els.provisioningResult));
+  }));
 
-  els.btnDryRun.addEventListener("click", () => runAction(async () => {
-    const file = requireFile();
-    if (!file) return;
+  els.btnDryRun.addEventListener("click", () => runProvisioningAction(async () => {
+    const files = requireFiles();
+    if (!files) return;
     const body = new FormData();
-    body.append("file", file);
+    appendFiles(body, files);
     const result = await request("POST", "/api/provisioning/execute?dryRun=true", body, true);
     renderProvisioning(result);
-  }, els.provisioningResult));
+  }));
 
-  els.btnExecute.addEventListener("click", () => runAction(async () => {
-    const file = requireFile();
-    if (!file) return;
+  els.btnExecute.addEventListener("click", () => runProvisioningAction(async () => {
+    const files = requireFiles();
+    if (!files) return;
     if (!confirm("Execute provisioning on server?")) return;
     const body = new FormData();
-    body.append("file", file);
+    appendFiles(body, files);
     const result = await request("POST", "/api/provisioning/execute?dryRun=false", body, true);
     renderProvisioning(result);
-  }, els.provisioningResult));
+  }));
 }
 
 async function loadConfiguredView() {
@@ -73,10 +77,11 @@ async function loadConfiguredView() {
     ["User", result.userName],
     ["UseAccessToken", String(result.useAccessToken)],
     ["ConfigurationGuid", result.configurationGuid ?? "null"],
-    ["ClientProgramDirectory", result.clientProgramDirectory],
     ["Communication", result.communicationMode],
     ["Serializer", result.dataSerializerAlgorithm],
-    ["Compression", result.compressionAlgorithm]
+    ["Compression", result.compressionAlgorithm],
+    ["AdapterExecutablePath", result.adapterExecutablePath],
+    ["AdapterTimeoutSeconds", String(result.adapterTimeoutSeconds)]
   ];
   els.configuredView.innerHTML = lines
     .map(([k, v]) => `<div><strong>${escapeHtml(k)}</strong><span>${escapeHtml(v ?? "")}</span></div>`)
@@ -85,7 +90,6 @@ async function loadConfiguredView() {
   const form = els.customConnectionForm;
   form.server.value = result.server ?? "";
   form.userName.value = result.userName ?? "";
-  form.clientProgramDirectory.value = result.clientProgramDirectory ?? "";
   form.communicationMode.value = result.communicationMode ?? "GRPC";
   form.dataSerializerAlgorithm.value = result.dataSerializerAlgorithm ?? "Default";
   form.compressionAlgorithm.value = result.compressionAlgorithm ?? "None";
@@ -101,50 +105,141 @@ function readConnectionForm() {
     useAccessToken: f.useAccessToken.value === "true",
     accessToken: f.accessToken.value.trim(),
     configurationGuid: guidRaw ? guidRaw : null,
-    clientProgramDirectory: f.clientProgramDirectory.value.trim(),
     communicationMode: f.communicationMode.value,
     dataSerializerAlgorithm: f.dataSerializerAlgorithm.value,
     compressionAlgorithm: f.compressionAlgorithm.value
   };
 }
 
-function requireFile() {
-  const file = els.fileInput.files?.[0];
-  if (!file) {
-    renderJson(els.provisioningResult, { error: "Select CSV or XML file first." });
+function appendFiles(formData, files) {
+  files.forEach((file) => formData.append("files", file));
+}
+
+function requireFiles() {
+  const files = Array.from(els.fileInput.files ?? []);
+  if (files.length === 0) {
+    renderJson(els.provisioningResult, { error: "Сначала выберите один или несколько CSV/XML/XLSX файлов." });
     return null;
   }
-  return file;
+  return files;
 }
 
 function renderProvisioning(payload) {
-  const parse = payload?.parse ?? null;
-  const plan = payload?.plan ?? payload?.execution?.plan ?? payload?.connection?.plan ?? payload?.plan;
-  const students = parse?.students ?? [];
-  const actions = plan?.actions ?? [];
+  const groups = extractGroups(payload);
+  const students = groups.flatMap((g) => (g.parse?.students ?? []).map((s) => ({ student: s, group: g.parse?.groupName ?? "-" })));
+  const actions = groups.flatMap((g) => (g.plan?.actions ?? []).map((a) => ({ action: a, group: g.plan?.groupName ?? g.parse?.groupName ?? "-" })));
 
-  els.groupName.textContent = plan?.groupName ?? parse?.groupName ?? "-";
-  els.studentsCount.textContent = String(students.length);
-  els.actionsCount.textContent = String(actions.length);
+  const groupNames = groups
+    .map((g) => g.plan?.groupName ?? g.parse?.groupName)
+    .filter((x) => Boolean(x));
+
+  els.groupName.textContent = groupNames.length ? groupNames.join(", ") : "-";
+  els.studentsCount.textContent = String(payload?.studentsCount ?? students.length);
+  els.actionsCount.textContent = String(payload?.actionsCount ?? actions.length);
 
   els.studentsTableBody.innerHTML = students
-    .map((s, i) => `<tr>
+    .map((item, i) => `<tr>
       <td>${i + 1}</td>
-      <td>${escapeHtml(s.login)}</td>
-      <td>${escapeHtml(s.fullName)}</td>
-      <td>${escapeHtml(s.pinCode)}</td>
+      <td>${escapeHtml(item.group)}</td>
+      <td>${escapeHtml(item.student.login)}</td>
+      <td>${escapeHtml(item.student.fullName)}</td>
+      <td>${escapeHtml(item.student.pinCode)}</td>
     </tr>`)
     .join("");
 
   els.actionsTableBody.innerHTML = actions
-    .map((a) => `<tr>
-      <td>${escapeHtml(a.step)}</td>
-      <td>${escapeHtml(a.target)}</td>
-      <td>${escapeHtml(a.details)}</td>
+    .map((item) => `<tr>
+      <td>${escapeHtml(item.group)}</td>
+      <td>${escapeHtml(item.action.step)}</td>
+      <td>${escapeHtml(item.action.target)}</td>
+      <td>${escapeHtml(item.action.details)}</td>
     </tr>`)
     .join("");
 
+  renderPasswordDownloads(groups);
+  renderExecutionDetails(payload, groups);
   renderJson(els.provisioningResult, payload);
+}
+
+function extractGroups(payload) {
+  if (Array.isArray(payload?.groups) && payload.groups.length > 0) {
+    return payload.groups;
+  }
+
+  if (payload?.parse || payload?.plan || payload?.passwordExport || payload?.execution) {
+    return [{
+      fileName: payload?.parse?.groupName ?? "group",
+      parse: payload?.parse ?? null,
+      plan: payload?.plan ?? null,
+      passwordExport: payload?.passwordExport ?? null,
+      execution: payload?.execution ?? null
+    }];
+  }
+
+  return [];
+}
+
+function renderPasswordDownloads(groups) {
+  const entries = groups
+    .map((g) => {
+      const exp = g.passwordExport;
+      if (!exp?.csvUrl || !exp?.xlsxUrl) return null;
+      const groupName = g.parse?.groupName ?? exp.groupName ?? "group";
+      return { groupName, csvUrl: exp.csvUrl, xlsxUrl: exp.xlsxUrl };
+    })
+    .filter((x) => x);
+
+  if (entries.length === 0) {
+    els.passwordDownloads.hidden = true;
+    els.passwordDownloadsList.innerHTML = "";
+    return;
+  }
+
+  els.passwordDownloadsList.innerHTML = entries
+    .map((entry) => `<div>
+      <strong>${escapeHtml(entry.groupName)}</strong>
+      <a class="download-link" href="${escapeHtml(entry.csvUrl)}" target="_blank" rel="noopener">CSV</a>
+      <a class="download-link" href="${escapeHtml(entry.xlsxUrl)}" target="_blank" rel="noopener">XLSX</a>
+    </div>`)
+    .join("");
+  els.passwordDownloads.hidden = false;
+}
+
+function renderExecutionDetails(payload, groups) {
+  const logs = [];
+  const warnings = [];
+  const isInfoDiagnostic = (text) => String(text ?? "").toLowerCase().startsWith("connection attempt:");
+
+  groups.forEach((group) => {
+    const groupName = group?.parse?.groupName ?? group?.plan?.groupName ?? "group";
+
+    (group?.parse?.errors ?? []).forEach((item) => warnings.push(`[${groupName}] ${item}`));
+    (group?.parse?.warnings ?? []).forEach((item) => warnings.push(`[${groupName}] ${item}`));
+    (group?.execution?.warnings ?? []).forEach((item) => warnings.push(`[${groupName}] ${item}`));
+    (group?.execution?.diagnostics ?? []).forEach((item) => {
+      if (!isInfoDiagnostic(item)) {
+        warnings.push(`[${groupName}] ${item}`);
+      }
+    });
+    (group?.execution?.logs ?? []).forEach((item) => logs.push(`[${groupName}] ${item}`));
+  });
+
+  (payload?.connection?.missingDependencies ?? []).forEach((item) => {
+    if (!isInfoDiagnostic(item)) {
+      warnings.push(`[connection] ${item}`);
+    }
+  });
+  if (payload?.message) {
+    warnings.push(payload.message);
+  }
+
+  els.executionLogs.innerHTML = logs.length
+    ? logs.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : `<li>${escapeHtml("Логов пока нет.")}</li>`;
+
+  els.executionWarnings.innerHTML = warnings.length
+    ? warnings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : `<li>${escapeHtml("Предупреждений нет.")}</li>`;
 }
 
 async function request(method, url, body, isFormData = false) {
@@ -179,6 +274,14 @@ async function runAction(action, output) {
     await action();
   } catch (error) {
     renderJson(output, error);
+  }
+}
+
+async function runProvisioningAction(action) {
+  try {
+    await action();
+  } catch (error) {
+    renderProvisioning(error);
   }
 }
 

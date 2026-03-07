@@ -1,8 +1,10 @@
-using EngGraphLabAdminApp.Models;
+using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using EngGraphLabAdminApp.Models;
 
 namespace EngGraphLabAdminApp.Services;
 
@@ -39,8 +41,9 @@ public sealed class StudentTableParser : IStudentTableParser
             {
                 ".csv" => ParseCsv(bytes, parseWarnings),
                 ".xml" => ParseXml(bytes, parseWarnings),
-                ".xlsx" or ".xls" => throw new NotSupportedException("Excel не реализован в базовом каркасе. Добавьте пакет ClosedXML или OpenXML SDK."),
-                _ => throw new NotSupportedException($"Формат {extension} не поддерживается. Поддерживаются: .csv, .xml."),
+                ".xlsx" => ParseXlsx(bytes),
+                ".xls" => throw new NotSupportedException("Формат .xls (старый бинарный Excel) не поддерживается. Сохраните файл как .xlsx, .csv или .xml."),
+                _ => throw new NotSupportedException($"Формат {extension} не поддерживается. Поддерживаются: .csv, .xml, .xlsx.")
             };
         }
         catch (Exception ex)
@@ -207,6 +210,229 @@ public sealed class StudentTableParser : IStudentTableParser
         return result;
     }
 
+    private static List<RawStudentRow> ParseXlsx(byte[] bytes)
+    {
+        using var memory = new MemoryStream(bytes);
+        using var archive = new ZipArchive(memory, ZipArchiveMode.Read, leaveOpen: false);
+
+        var workbookEntry = archive.GetEntry("xl/workbook.xml")
+            ?? throw new InvalidOperationException("В .xlsx отсутствует xl/workbook.xml.");
+        var workbook = LoadXml(workbookEntry);
+
+        XNamespace wbNs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        XNamespace relNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        var firstSheet = workbook
+            .Element(wbNs + "sheets")?
+            .Elements(wbNs + "sheet")
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("В .xlsx отсутствуют листы.");
+
+        var relationshipId = firstSheet.Attribute(relNs + "id")?.Value;
+        if (string.IsNullOrWhiteSpace(relationshipId))
+        {
+            throw new InvalidOperationException("Не удалось определить relationship id первого листа.");
+        }
+
+        var relEntry = archive.GetEntry("xl/_rels/workbook.xml.rels")
+            ?? throw new InvalidOperationException("В .xlsx отсутствует xl/_rels/workbook.xml.rels.");
+        var relDoc = LoadXml(relEntry);
+        XNamespace relDocNs = "http://schemas.openxmlformats.org/package/2006/relationships";
+        var relationship = relDoc
+            .Elements(relDocNs + "Relationship")
+            .FirstOrDefault(x => string.Equals(x.Attribute("Id")?.Value, relationshipId, StringComparison.Ordinal));
+
+        if (relationship is null)
+        {
+            throw new InvalidOperationException("Не найден relationship для первого листа.");
+        }
+
+        var target = relationship.Attribute("Target")?.Value;
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            throw new InvalidOperationException("Relationship листа не содержит Target.");
+        }
+
+        var normalizedTarget = target.Replace('\\', '/').TrimStart('/');
+        var sheetPath = normalizedTarget.StartsWith("xl/", StringComparison.OrdinalIgnoreCase)
+            ? normalizedTarget
+            : $"xl/{normalizedTarget}";
+
+        var sheetEntry = archive.GetEntry(sheetPath)
+            ?? throw new InvalidOperationException($"Не найден XML листа: {sheetPath}.");
+
+        var sharedStrings = ReadSharedStrings(archive);
+        var sheet = LoadXml(sheetEntry);
+
+        var rows = sheet
+            .Elements(wbNs + "sheetData")
+            .Elements(wbNs + "row")
+            .ToArray()
+            ?? [];
+
+        if (rows.Length == 0)
+        {
+            throw new InvalidOperationException("Лист .xlsx пустой.");
+        }
+
+        var parsedRows = rows
+            .Select(row => ParseWorksheetRow(row, wbNs, sharedStrings))
+            .Where(static x => x.Values.Count > 0)
+            .ToArray();
+
+        if (parsedRows.Length == 0)
+        {
+            throw new InvalidOperationException("В листе .xlsx отсутствуют строки данных.");
+        }
+
+        var headerRow = parsedRows[0];
+        var headers = BuildHeaderArray(headerRow.Values);
+        var map = BuildHeaderMap(headers);
+
+        var result = new List<RawStudentRow>();
+        for (var i = 1; i < parsedRows.Length; i++)
+        {
+            var row = parsedRows[i];
+            result.Add(new RawStudentRow(
+                LastName: GetFieldByColumn(row.Values, map.LastNameIndex),
+                FirstName: GetFieldByColumn(row.Values, map.FirstNameIndex),
+                MiddleName: GetFieldByColumn(row.Values, map.MiddleNameIndex),
+                Login: GetFieldByColumn(row.Values, map.LoginIndex),
+                RowNumber: row.RowNumber));
+        }
+
+        return result;
+    }
+
+    private static XElement LoadXml(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        return XElement.Load(stream, LoadOptions.None);
+    }
+
+    private static IReadOnlyList<string> ReadSharedStrings(ZipArchive archive)
+    {
+        var sharedStringsEntry = archive.GetEntry("xl/sharedStrings.xml");
+        if (sharedStringsEntry is null)
+        {
+            return [];
+        }
+
+        var root = LoadXml(sharedStringsEntry);
+        XNamespace wbNs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+        return root
+            .Elements(wbNs + "si")
+            .Select(si => string.Concat(si.Descendants(wbNs + "t").Select(static t => t.Value)))
+            .ToArray();
+    }
+
+    private static ParsedWorksheetRow ParseWorksheetRow(XElement row, XNamespace wbNs, IReadOnlyList<string> sharedStrings)
+    {
+        var values = new Dictionary<int, string>();
+        var rowNumber = ParseRowNumber(row.Attribute("r")?.Value);
+
+        foreach (var cell in row.Elements(wbNs + "c"))
+        {
+            var reference = cell.Attribute("r")?.Value;
+            var columnIndex = ParseColumnIndex(reference);
+            if (columnIndex < 0)
+            {
+                continue;
+            }
+
+            var type = cell.Attribute("t")?.Value;
+            var value = ReadCellValue(cell, wbNs, type, sharedStrings);
+            values[columnIndex] = value;
+        }
+
+        return new ParsedWorksheetRow(rowNumber, values);
+    }
+
+    private static int ParseRowNumber(string? rowReference)
+    {
+        if (string.IsNullOrWhiteSpace(rowReference))
+        {
+            return 0;
+        }
+
+        var digits = new string(rowReference.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rowNumber)
+            ? rowNumber
+            : 0;
+    }
+
+    private static int ParseColumnIndex(string? cellReference)
+    {
+        if (string.IsNullOrWhiteSpace(cellReference))
+        {
+            return -1;
+        }
+
+        var letters = new string(cellReference.Where(char.IsLetter).ToArray()).ToUpperInvariant();
+        if (letters.Length == 0)
+        {
+            return -1;
+        }
+
+        var value = 0;
+        foreach (var ch in letters)
+        {
+            value = (value * 26) + (ch - 'A' + 1);
+        }
+
+        return value - 1;
+    }
+
+    private static string ReadCellValue(XElement cell, XNamespace wbNs, string? cellType, IReadOnlyList<string> sharedStrings)
+    {
+        var value = cell.Element(wbNs + "v")?.Value ?? string.Empty;
+        if (string.Equals(cellType, "s", StringComparison.OrdinalIgnoreCase))
+        {
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) &&
+                index >= 0 &&
+                index < sharedStrings.Count)
+            {
+                return sharedStrings[index];
+            }
+
+            return string.Empty;
+        }
+
+        if (string.Equals(cellType, "inlineStr", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat(cell.Descendants(wbNs + "t").Select(static t => t.Value));
+        }
+
+        if (string.Equals(cellType, "b", StringComparison.OrdinalIgnoreCase))
+        {
+            return value == "1" ? "true" : "false";
+        }
+
+        return value;
+    }
+
+    private static IReadOnlyList<string> BuildHeaderArray(IReadOnlyDictionary<int, string> columns)
+    {
+        if (columns.Count == 0)
+        {
+            return [];
+        }
+
+        var maxIndex = columns.Keys.Max();
+        var headers = new string[maxIndex + 1];
+        foreach (var pair in columns)
+        {
+            headers[pair.Key] = pair.Value;
+        }
+
+        return headers;
+    }
+
+    private static string GetFieldByColumn(IReadOnlyDictionary<int, string> columns, int index)
+    {
+        return columns.TryGetValue(index, out var value) ? value : string.Empty;
+    }
+
     private static bool HasAnyRequiredColumns(XElement element)
     {
         var names = element.Elements()
@@ -368,4 +594,6 @@ public sealed class StudentTableParser : IStudentTableParser
         int LoginIndex);
 
     private sealed record IndexedHeader(string Header, int Index);
+
+    private sealed record ParsedWorksheetRow(int RowNumber, IReadOnlyDictionary<int, string> Values);
 }

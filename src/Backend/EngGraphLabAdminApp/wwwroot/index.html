@@ -16,26 +16,26 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Connection</h2>
-        <button id="btnCheckConfigured" class="btn btn-primary">Check configured connection</button>
+        <h2>Подключение</h2>
+        <button id="btnCheckConfigured" class="btn btn-primary">Проверить конфиг</button>
       </div>
 
       <div id="configuredView" class="config-grid"></div>
 
       <form id="customConnectionForm" class="grid">
-        <label>Server
-          <input name="server" placeholder="31.29.180.7:21325" required />
+        <label>Сервер
+          <input name="server" placeholder="31.29.180.7:21321" required />
         </label>
-        <label>User
+        <label>Пользователь
           <input name="userName" placeholder="Администратор" />
         </label>
-        <label>Password
+        <label>Пароль
           <input type="password" name="password" autocomplete="off" />
         </label>
         <label>Access token
           <input name="accessToken" />
         </label>
-        <label>Use access token
+        <label>Использовать access token
           <select name="useAccessToken">
             <option value="false" selected>false</option>
             <option value="true">true</option>
@@ -44,23 +44,20 @@
         <label>Configuration GUID
           <input name="configurationGuid" placeholder="optional" />
         </label>
-        <label>Client Program dir
-          <input name="clientProgramDirectory" placeholder="C:\Program Files (x86)\T-FLEX DOCs 17\Program" />
-        </label>
-        <label>Communication
+        <label>Транспорт
           <select name="communicationMode">
             <option value="GRPC" selected>GRPC</option>
             <option value="WCF">WCF</option>
           </select>
         </label>
-        <label>Serializer
+        <label>Сериализация
           <select name="dataSerializerAlgorithm">
             <option value="Default" selected>Default</option>
             <option value="Protobuf">Protobuf</option>
             <option value="ZeroFormatter">ZeroFormatter</option>
           </select>
         </label>
-        <label>Compression
+        <label>Сжатие
           <select name="compressionAlgorithm">
             <option value="None" selected>None</option>
             <option value="GZip">GZip</option>
@@ -71,9 +68,13 @@
           </select>
         </label>
       </form>
+      <p class="hint">
+        Путь к установленному клиенту больше не обязателен: web запускает net48 adapter по IPC,
+        а adapter автоматически ищет зависимости в <code>src/Backend/libs</code> и рядом с <code>TFlexDocsAdapter.exe</code>.
+      </p>
 
       <div class="actions">
-        <button id="btnCheckCustom" class="btn">Check custom connection</button>
+        <button id="btnCheckCustom" class="btn">Проверить вручную</button>
       </div>
       <pre id="connectionResult" class="result"></pre>
     </section>
@@ -84,33 +85,39 @@
       </div>
 
       <div class="grid compact">
-        <label>Input file (CSV/XML)
-          <input id="fileInput" type="file" accept=".csv,.xml" />
+        <label>Файл со студентами (CSV/XML/XLSX)
+          <input id="fileInput" type="file" accept=".csv,.xml,.xlsx" multiple />
         </label>
       </div>
 
       <div class="actions">
-        <button id="btnPreview" class="btn">Preview plan</button>
+        <button id="btnPreview" class="btn">Preview</button>
         <button id="btnDryRun" class="btn">Dry run execute</button>
         <button id="btnExecute" class="btn btn-danger">Execute</button>
       </div>
 
+      <div id="passwordDownloads" class="downloads" hidden>
+        <span>Файлы с паролями:</span>
+        <div id="passwordDownloadsList" class="downloads-list"></div>
+      </div>
+
       <div class="stats">
-        <div><span>Group:</span> <strong id="groupName">-</strong></div>
-        <div><span>Students:</span> <strong id="studentsCount">0</strong></div>
-        <div><span>Actions:</span> <strong id="actionsCount">0</strong></div>
+        <div><span>Группа:</span> <strong id="groupName">-</strong></div>
+        <div><span>Студенты:</span> <strong id="studentsCount">0</strong></div>
+        <div><span>Действия:</span> <strong id="actionsCount">0</strong></div>
       </div>
 
       <div class="tables">
         <div>
-          <h3>Students</h3>
+          <h3>Студенты</h3>
           <div class="table-wrap">
             <table id="studentsTable">
               <thead>
                 <tr>
                   <th>#</th>
+                  <th>Группа</th>
                   <th>Login</th>
-                  <th>Full Name</th>
+                  <th>ФИО</th>
                   <th>PIN</th>
                 </tr>
               </thead>
@@ -119,11 +126,12 @@
           </div>
         </div>
         <div>
-          <h3>Plan Actions</h3>
+          <h3>План</h3>
           <div class="table-wrap">
             <table id="actionsTable">
               <thead>
                 <tr>
+                  <th>Группа</th>
                   <th>Step</th>
                   <th>Target</th>
                   <th>Details</th>
@@ -132,6 +140,17 @@
               <tbody></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <div class="log-grid">
+        <div>
+          <h3>Лог выполнения</h3>
+          <ul id="executionLogs" class="log-list"></ul>
+        </div>
+        <div>
+          <h3>Предупреждения</h3>
+          <ul id="executionWarnings" class="log-list warn"></ul>
         </div>
       </div>
 

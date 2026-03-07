@@ -2,9 +2,11 @@ using EngGraphLabAdminApp.Models;
 
 namespace EngGraphLabAdminApp.Services;
 
-public sealed class ProvisioningService : IProvisioningService
+public sealed class ProvisioningService(ITFlexConnectionService connectionService) : IProvisioningService
 {
-    public ProvisioningPlan BuildPlan(string groupName, IReadOnlyList<StudentImportRow> students)
+    private readonly ITFlexConnectionService _connectionService = connectionService;
+
+    public ProvisioningPlan BuildPlan(string groupName, IReadOnlyList<StudentImportRow> students, bool includeTaskDistribution)
     {
         var actions = new List<ProvisioningAction>
         {
@@ -29,33 +31,36 @@ public sealed class ProvisioningService : IProvisioningService
             actions.Add(new ProvisioningAction(
                 Step: "EnsureGroupFolder",
                 Target: $"Файлы/Студенты/{groupName}",
-                Details: "Создать папку группы и назначить доступ Редакторский группе и Преподавателям."));
+                Details: "Создать папку группы и подготовить права доступа для группы и преподавателей."));
 
             actions.Add(new ProvisioningAction(
                 Step: "EnsureStudentFolder",
                 Target: $"Файлы/Студенты/{groupName}/{student.FolderName}",
-                Details: "Создать рабочую папку студента, выдать доступ Редакторский студенту и Преподавателям."));
+                Details: "Создать рабочую папку студента и подготовить права доступа для студента и преподавателей."));
 
             actions.Add(new ProvisioningAction(
-                Step: "AssignTasks",
+                Step: "EnsureStudentTasksFolder",
                 Target: $"Файлы/Студенты/{groupName}/{student.FolderName}/Задания",
-                Details: "Положить по одному случайному заданию из каждой папки 'Работа N' с переименованием 'Работа N.<ext>'."));
+                Details: "Создать подпапку 'Задания' у студента и подготовить права доступа для студента и преподавателей."));
+
+            if (includeTaskDistribution)
+            {
+                actions.Add(new ProvisioningAction(
+                    Step: "AssignTasks",
+                    Target: $"Файлы/Студенты/{groupName}/{student.FolderName}/Задания",
+                    Details: "Положить по одному случайному заданию из каждой папки 'Работа N' с переименованием 'Работа N.<ext>'."));
+            }
         }
 
         return new ProvisioningPlan(
             GroupName: groupName,
             StudentsCount: students.Count,
+            Students: students,
             Actions: actions);
     }
 
-    public Task<ProvisioningExecutionResult> ExecuteFoundationAsync(ProvisioningPlan plan, CancellationToken cancellationToken)
+    public Task<ProvisioningExecutionResult> ExecuteFoundationAsync(ProvisioningPlan plan, bool includeTaskDistribution, CancellationToken cancellationToken)
     {
-        _ = cancellationToken;
-
-        return Task.FromResult(new ProvisioningExecutionResult(
-            Success: true,
-            Message: "Базовый каркас execution выполнен в режиме foundation. Реальные вызовы OpenAPI для users/files/rights/tasks подключаются в этом методе.",
-            PlannedActions: plan.Actions.Count,
-            ExecutedActions: 0));
+        return _connectionService.ExecuteFoundationAsync(plan, includeTaskDistribution, cancellationToken);
     }
 }

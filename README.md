@@ -1,92 +1,63 @@
-# Nuclear_Hack_ARLU
+﻿# Nuclear_Hack_ARLU
 
-Backend-сервис и веб-интерфейс для автоматизации задач T-FLEX DOCs по ТЗ хакатона:
-- проверка подключения к серверу T-FLEX DOCs,
-- импорт списка студентов (CSV/XML),
-- построение плана provisioning (группы, пользователи, папки, права, задания),
-- запуск в режиме `dry-run` и базовый `execute`-каркас.
+Тестовый стенд: 31.29.180.7:789453.
 
-## Что реализовано
+Вход в T-FLEX:
+- Адрес: 31.29.180.7:21325
+- Login: Администратор
+- Password: 323_75
 
-- ASP.NET Core backend (`net8.0`) с API:
-  - `POST /api/tflex/check-connection`
-  - `POST /api/tflex/check-connection/custom`
-  - `POST /api/provisioning/preview`
-  - `POST /api/provisioning/execute?dryRun=true|false`
-- Веб-интерфейс (MVP) по адресу `/`:
-  - форма проверки подключения,
-  - загрузка CSV/XML,
-  - просмотр студентов и плана действий,
-  - запуск `preview` / `dry-run` / `execute`.
-
-## Структура
-
-- `src/Backend/EngGraphLabAdminApp` — backend + UI (`wwwroot`)
-- `src/Backend/libs` — подключенные T-FLEX DLL:
-  - `TFlex.DOCs.Common.dll`
-  - `TFlex.DOCs.Model.dll`
-
-## Требования
-
-1. .NET SDK 8.0+
-2. Установленный клиент T-FLEX DOCs (той же ветки версии, что сервер)
-3. Доступ к серверу T-FLEX DOCs (логин/пароль или токен)
-
-## Откуда брать DLL для T-FLEX
-
-Для внешнего приложения DLL берутся из установленного клиента T-FLEX DOCs, обычно:
-
-`C:\Program Files (x86)\T-FLEX DOCs 17\Program`
-
-В проекте уже есть минимальные ссылки на `TFlex.DOCs.Common.dll` и `TFlex.DOCs.Model.dll`,  
-остальные зависимости подхватываются через `AssemblyResolver` из `ClientProgramDirectory`.
-
-Подробно: `src/Backend/EngGraphLabAdminApp/TFLEX_SETUP.md`
-
-## Конфигурация
-
-Базовые настройки:
-- `src/Backend/EngGraphLabAdminApp/appsettings.json`
-- `src/Backend/EngGraphLabAdminApp/appsettings.Development.json`
-
-Локальные (секретные) настройки:
-- `src/Backend/EngGraphLabAdminApp/appsettings.Local.json` (в `.gitignore`)
-- пример: `src/Backend/EngGraphLabAdminApp/appsettings.Local.example.json`
-
-Пример блока `TFlex`:
-
+## 1. Как развернуть это у себя
+1. Установите:
+   - Windows
+   - .NET SDK 8
+   - .NET Framework 4.8 Developer Pack
+   - доступ к серверу T-FLEX DOCs
+2. Создайте файл `src/Backend/EngGraphLabAdminApp/appsettings.Local.json`:
 ```json
 {
   "TFlex": {
-    "Server": "31.29.180.7:21325",
+    "Server": "31.29.180.7:21321",
     "UserName": "Администратор",
-    "Password": "******",
+    "Password": "PUT_REAL_PASSWORD_HERE",
     "UseAccessToken": false,
-    "ClientProgramDirectory": "C:\\Program Files (x86)\\T-FLEX DOCs 17\\Program",
+    "AccessToken": "",
+    "ConfigurationGuid": null,
     "CommunicationMode": "GRPC",
     "DataSerializerAlgorithm": "Default",
     "CompressionAlgorithm": "None"
+  },
+  "TFlexAdapter": {
+    "ExecutablePath": "",
+    "RequestTimeoutSeconds": 60
   }
 }
 ```
-
-## Запуск
-
+3. Соберите адаптер:
 ```powershell
-dotnet run --project src/Backend/EngGraphLabAdminApp/EngGraphLabAdminApp.csproj
+dotnet build src/Backend/TFlexDocsAdapter/TFlexDocsAdapter.csproj -c Release
 ```
+4. Запустите backend:
+```powershell
+dotnet run --project src/Backend/EngGraphLabAdminApp/EngGraphLabAdminApp.csproj -c Release
+```
+5. Откройте UI: `http://localhost:5101/`.
 
-По умолчанию профиль запуска использует `http://localhost:5101`.
+## 2. Как поменять адреса и установить версию DLL
+1. Адреса и доступы меняются в `src/Backend/EngGraphLabAdminApp/appsettings.Local.json`:
+   - `TFlex.Server`
+   - `TFlex.UserName`
+   - `TFlex.Password` (или `UseAccessToken` + `AccessToken`)
+2. Скопируйте DLL версии `17.5.4.187` в папку `src/Backend/libs/17.5.4.187`.
+3. Переключите `HintPath` например с `17.5.4.0` на `17.5.4.187` в файлах:
+   - `src/Backend/TFlexDocsAdapter/TFlexDocsAdapter.csproj`
+   - `src/Backend/TFlexDocsMacro/TFlexDocsMacro.csproj`
+   - `src/Backend/TFlexUserFoldersMacro/TFlexUserFoldersMacro.csproj`
+4. Пересоберите проекты backend/adapter.
 
-## Проверка
+## 3. Как сейчас работает система
+- Сейчас стабильно работает создание/обновление аккаунтов пользователей.
+- Создание папок и файлов в текущей реализации не работает стабильно.
+- Основная причина: ограничения и нестабильность API T-FLEX DOCs, а также старый стек .NET Framework на стороне T-FLEX.
 
-1. Открыть UI: `http://localhost:5101/`
-2. Проверить API:
-   - `GET /api/health`
-   - `POST /api/tflex/check-connection`
-3. Для проверки provisioning загрузить CSV/XML в UI и запустить `Preview`.
 
-## Важно
-
-- `execute` сейчас реализован как foundation-каркас (точка расширения под реальные операции OpenAPI).
-- Если в `check-connection` ошибка про отсутствующие DLL — проверьте `ClientProgramDirectory` и установленный клиент T-FLEX DOCs.

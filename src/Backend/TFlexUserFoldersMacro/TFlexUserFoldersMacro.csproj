@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>UserFoldersMacro</AssemblyName>
+    <RootNamespace>UserFolders</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="TFlex.DOCs.Model">
+      <HintPath>..\libs\17.5.4.0\TFlex.DOCs.Model.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TFlex.DOCs.Common">
+      <HintPath>..\libs\17.5.4.0\TFlex.DOCs.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

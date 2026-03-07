@@ -1,31 +1,62 @@
-# T-FLEX DOCs: where to get DLLs
+# T-FLEX setup
 
-For external .NET apps, DLLs are taken from the installed T-FLEX DOCs client:
+## Актуальная схема
 
-- default path: `C:\Program Files (x86)\T-FLEX DOCs 17\Program`
-- your app already supports this path via `TFlex:ClientProgramDirectory`
-- runtime resolver expects `TFlex.PdmFramework.Resolve.dll` in that directory
+`EngGraphLabAdminApp` (`net8`) не вызывает T-FLEX OpenAPI напрямую.
 
-Minimum project references in this repo:
+Вызовы идут через `src/Backend/TFlexDocsAdapter` (`net48`) по локальному IPC:
 
-- `TFlex.DOCs.Common.dll`
-- `TFlex.DOCs.Model.dll`
+- backend запускает `TFlexDocsAdapter.exe <command>`
+- JSON передаётся в `stdin`
+- JSON-ответ читается из `stdout`
 
-At runtime, additional dependencies are loaded from `ClientProgramDirectory` by `AssemblyResolver`.
+Команды adapter:
 
-If connection fails with `FileNotFoundException`, install T-FLEX DOCs client (same major/minor version as server) and ensure `ClientProgramDirectory` points to the `Program` folder.
+- `check-connection`
+- `execute-foundation`
 
-## Local secure config
+## Где должны лежать DLL
 
-Use `appsettings.Local.json` (ignored by git) for real credentials:
+Adapter ищет зависимости в следующих местах:
 
-```json
-{
-  "TFlex": {
-    "Server": "31.29.180.7:21325",
-    "UserName": "Администратор",
-    "Password": "*****",
-    "UseAccessToken": false
-  }
-}
-```
+1. Папка рядом с `TFlexDocsAdapter.exe`
+2. Подпапка `libs` рядом с `TFlexDocsAdapter.exe`
+3. `src/Backend/libs`
+4. `TFLEX_DOCS_HOME` и `TFLEX_DOCS_HOME/Program` (если переменная задана)
+5. Автопоиск установок `T-FLEX DOCs*` в `Program Files` / `Program Files (x86)`
+
+`ClientProgramDirectory` не нужен.
+
+## Диагностика ошибок подключения
+
+Если `check-connection` возвращает ошибку, смотрите `missingDependencies`:
+
+- цепочку исключений,
+- список недостающих DLL,
+- информацию о попытках подключения по режимам `GRPC/WCF`.
+
+### Частые случаи
+
+1. Нет нужной версии `TFlex.DOCs.*`
+- Положите совместимый набор DLL из одной и той же поставки T-FLEX DOCs в `src/Backend/libs`.
+
+2. Ошибки formatter/serializer
+- Adapter принудительно использует `Protobuf`, даже если в конфиге указан `Default`/`ZeroFormatter`.
+
+3. Ошибка только на `GRPC`
+- Adapter автоматически делает fallback-попытку через `WCF`.
+
+## Секреты
+
+Логины/пароли храните только в:
+
+`src/Backend/EngGraphLabAdminApp/appsettings.Local.json`
+
+Файл должен оставаться вне git.
+
+## Update 2026-03
+
+- Adapter no longer forces `Default/ZeroFormatter` to `Protobuf`.
+- `execute-foundation` applies ACL rules for group/student folders and deny rule for root `Задания`.
+- Assignment flow supports CAD export to `TIFF/PDF` with fallback to source extension if export is unavailable.
+- Password export is available via backend endpoint: `GET /api/provisioning/passwords/{token}?format=csv|xlsx`.

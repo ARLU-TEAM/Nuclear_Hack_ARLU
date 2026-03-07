@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.Core" Version="2.46.6" />
+    <PackageReference Include="Grpc.Core.Api" Version="2.63.0" />
+    <PackageReference Include="Squid-Box.SevenZipSharp" Version="1.6.2.24" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4" />
+    <PackageReference Include="chilkat-x64" Version="9.5.0.86" />
+    <Reference Include="TFlex.DOCs.Model">
+      <HintPath>../libs/17.5.4.0/TFlex.DOCs.Model.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="TFlex.DOCs.Common">
+      <HintPath>../libs/17.5.4.0/TFlex.DOCs.Common.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="TFlex.PdmFramework.Resolve">
+      <HintPath>../libs/17.5.4.0/TFlex.PdmFramework.Resolve.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\libs\17.5.4.0\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

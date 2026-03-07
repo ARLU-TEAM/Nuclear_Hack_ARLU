@@ -7,4 +7,5 @@ public interface ITFlexConnectionService
 {
     Task<TFlexConnectionCheckResult> CheckConnectionAsync(CancellationToken cancellationToken);
     Task<TFlexConnectionCheckResult> CheckConnectionAsync(TFlexOptions options, CancellationToken cancellationToken);
+    Task<ProvisioningExecutionResult> ExecuteFoundationAsync(ProvisioningPlan plan, bool includeTaskDistribution, CancellationToken cancellationToken);
 }

@@ -8,8 +8,8 @@ public sealed class TFlexConnectionRequest
     public bool UseAccessToken { get; set; }
     public string AccessToken { get; set; } = string.Empty;
     public Guid? ConfigurationGuid { get; set; }
-    public string ClientProgramDirectory { get; set; } = string.Empty;
     public string CommunicationMode { get; set; } = "GRPC";
     public string DataSerializerAlgorithm { get; set; } = "Default";
     public string CompressionAlgorithm { get; set; } = "None";
+    public string FolderCreationMacroName { get; set; } = string.Empty;
 }

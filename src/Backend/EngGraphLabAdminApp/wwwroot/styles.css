@@ -112,6 +112,39 @@ input, select {
   gap: 8px;
 }
 
+.downloads {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.downloads-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.download-link {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--brand);
+  text-decoration: none;
+  background: #fff;
+}
+
+.download-link:hover {
+  border-color: var(--brand);
+}
+
+.hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .btn {
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -182,6 +215,29 @@ input, select {
   gap: 12px;
 }
 
+.log-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.log-list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.log-list li {
+  margin: 3px 0;
+}
+
+.log-list.warn li {
+  color: #8b1d00;
+}
+
 .table-wrap {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -210,6 +266,10 @@ th {
 
 @media (min-width: 980px) {
   .tables {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .log-grid {
     grid-template-columns: 1fr 1fr;
   }
 }
